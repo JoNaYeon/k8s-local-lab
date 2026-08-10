@@ -1,7 +1,32 @@
+# ============================================================================
+# [최상위 Kustomization] — 이 레포의 모든 매니페스트를 하나로 묶는 "목차" 파일
+#
+# Kustomize란?
+#   - 여러 개의 쿠버네티스 YAML 파일을 묶어서 한 번에 배포/검증하게 해주는 도구.
+#   - kubectl에 내장되어 있어 `kubectl apply -k <디렉토리>` 로 실행한다.
+#   - 이 파일(kustomization.yml)이 있는 디렉토리가 "하나의 배포 단위"가 된다.
+#
+# 이 파일의 역할:
+#   - `kubectl apply -k manifests/` 또는 `kustomize build manifests/` 실행 시
+#     아래 resources 목록에 적힌 하위 디렉토리들을 전부 모아서 적용한다.
+#   - CI(.github/workflows/ci.yml의 "Validate Kustomize manifests" 스텝)에서도
+#     이 파일을 진입점으로 삼아 전체 YAML 문법을 검증한다.
+#
+# DevOps 관점에서 왜 필요한가?
+#   - 파일이 늘어나도 배포 명령이 `apply -k` 하나로 고정된다 (실수 방지).
+#   - 나중에 dev/staging/prod 환경별로 값만 바꾸는 "overlay" 구조로 확장할 수 있다.
+#     (참고: docs/05-production-mapping.md — 네임스페이스/환경 분리)
+# ============================================================================
+
+# 이 문서가 Kustomize 설정 파일임을 선언 (쿠버네티스 API 버전 표기 규칙과 동일한 형식)
 apiVersion: kustomize.config.k8s.io/v1beta1
+# 문서의 종류 — Kustomization은 "리소스 묶음 정의"라는 뜻
 kind: Kustomization
 
+# 이 배포 단위에 포함할 하위 디렉토리 목록.
+# 각 디렉토리 안의 kustomization.yml이 다시 그 안의 파일들을 정의한다.
+# 나열 순서대로 빌드되므로, 먼저 있어야 하는 것(네임스페이스)을 앞에 둔다.
 resources:
-  - base/
-  - database/
-  - app/
+  - base/          # 네임스페이스(seemedi-dev, monitoring) — 모든 리소스의 "그릇"이므로 가장 먼저
+  - database/      # PostgreSQL (StatefulSet + PVC + Service + ConfigMap + Secret)
+  - app/           # 샘플 앱 (Deployment + Service + Ingress + ConfigMap + Secret + HPA)

@@ -1,29 +1,64 @@
+# ============================================================================
+# [GitHub Actions CI] — 코드를 push할 때마다 자동으로 품질 검사를 실행한다.
+#
+# CI(Continuous Integration)란?
+#   - 코드가 저장소에 올라올 때마다 빌드/검사/테스트를 "자동으로" 실행하는 것.
+#   - GitHub Actions는 GitHub가 제공하는 CI 실행 서비스다.
+#   - 이 파일은 .github/workflows/ 안에 있기만 하면 GitHub가 자동 인식한다.
+#
+# DevOps 관점에서 왜 필요한가?
+#   - "내 컴퓨터에서는 됐는데"를 차단한다 — 깨끗한 새 환경(ubuntu-latest)에서
+#     매번 검증하므로, 로컬에만 있던 파일/설정에 의존한 코드를 잡아낸다.
+#   - 문법이 깨진 YAML이나 lint 오류가 main에 합쳐지는 것을 사람 리뷰 전에 막는다.
+#   - 프로덕션에서는 여기에 이미지 push + ArgoCD 자동 배포가 추가된다.
+#     (참고: docs/05-production-mapping.md — 6. CI/CD)
+#
+# 결과 확인: GitHub 저장소 → Actions 탭 (실패 시 커밋에 빨간 X 표시)
+# ============================================================================
+
+# 워크플로 이름 — GitHub Actions 탭에 표시되는 제목
 name: CI
 
+# ── 실행 조건(트리거) ────────────────────────────────────────────────────────
 on:
   push:
-    branches: [main]
+    branches: [main]        # main 브랜치에 push될 때 실행
   pull_request:
-    branches: [main]
+    branches: [main]        # main을 대상으로 한 PR이 열리거나 갱신될 때 실행
+                            # → PR 단계에서 미리 검사해 "깨진 코드가 main에 못 들어오게" 한다
 
+# ── 작업(jobs) 정의 ─────────────────────────────────────────────────────────
+# 각 job은 서로 독립된 가상 머신에서 "병렬로" 실행된다.
+# lint가 실패해도 docker 빌드 결과는 따로 확인할 수 있다.
 jobs:
+  # Job 1: 코드 스타일 검사 + 매니페스트 문법 검증
   lint:
     name: Lint & Validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest              # GitHub가 제공하는 최신 Ubuntu 가상 머신에서 실행
     steps:
+      # 저장소 코드를 가상 머신으로 내려받는다 (모든 워크플로의 사실상 첫 단계).
+      # @v4 = 액션 버전 고정 — 재현성을 위해 latest 대신 버전을 명시한다
       - uses: actions/checkout@v4
 
+      # Python 3.12 설치 — app/pyproject.toml의 requires-python(>=3.12)과 일치시킨다
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      # ruff: 빠른 Python 린터(문법/스타일 검사기) — SMEDI 표준 도구
       - name: Install ruff
         run: pip install ruff
 
+      # app/ 아래 Python 코드를 검사. 규칙은 app/pyproject.toml의 [tool.ruff] 설정을 따른다.
+      # 오류가 있으면 이 스텝이 실패하고 → job 실패 → 커밋에 X 표시
       - name: Lint Python code
         run: ruff check app/
 
+      # kustomize build: manifests/kustomization.yml부터 전체 YAML을 실제로 조립해본다.
+      # 문법 오류, 잘못된 참조(없는 파일 등)가 있으면 여기서 실패한다.
+      # `> /dev/null`: 조립된 YAML 내용은 버리고 성공/실패만 확인 (검증이 목적).
+      # DevOps 관점: "배포해보고 나서야 YAML 오타를 발견"하는 사고를 CI에서 미리 차단.
       - name: Validate Kustomize manifests
         run: |
           curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
@@ -31,11 +66,17 @@ jobs:
           kustomize build manifests/ > /dev/null
           echo "Kustomize validation passed"
 
+  # Job 2: Docker 이미지가 실제로 빌드되는지 확인
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # app/Dockerfile로 이미지를 빌드해본다 (make build와 동일한 명령, 태그만 :ci).
+      # 빌드만 하고 push는 하지 않는다 — 로컬 학습 단계라 레지스트리가 없기 때문.
+      # 프로덕션 전환 시 이 뒤에 GHCR/ECR push 스텝이 추가된다.
+      # DevOps 관점: requirements.txt 오타, COPY 경로 오류 등 "빌드 자체가 깨지는"
+      # 문제를 merge 전에 잡는다.
       - name: Build Docker image
         run: docker build -t sample-app:ci ./app

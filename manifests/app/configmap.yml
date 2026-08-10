@@ -1,23 +1,39 @@
 # ============================================================================
-# ConfigMap — 비밀이 아닌 설정값을 저장하는 쿠버네티스 리소스
+# [ConfigMap] — 비밀이 아닌 설정값을 저장하는 쿠버네티스 리소스
 #
-# 왜 ConfigMap을 쓰는가?
-#   - 설정을 코드에서 분리한다 (12-Factor App 원칙)
-#   - 이미지를 다시 빌드하지 않고도 설정을 변경할 수 있다
-#   - 환경별(local/staging/prod) 다른 값을 넣을 수 있다
+# 비유: ConfigMap = 사무실 게시판의 "공지사항" (참고: docs/02-key-concepts.md — 6. ConfigMap)
+#   - 누구나 봐도 되는 정보 (앱 이름, 로그 레벨, 타임존 등)
+#
+# 왜 ConfigMap을 쓰는가? (DevOps 관점)
+#   - 설정을 코드/이미지에서 분리한다 (12-Factor App 원칙).
+#     → 이미지를 다시 빌드하지 않고 설정만 바꿀 수 있다.
+#   - 환경별(local/staging/prod)로 다른 값을 주입할 수 있다.
+#     같은 이미지가 어디서나 동작하고, 차이는 ConfigMap 값뿐.
 #
 # ConfigMap vs Secret:
-#   - ConfigMap: 비밀이 아닌 설정 (앱 이름, 로그 레벨, 타임존 등)
-#   - Secret: 비밀 정보 (DB 비밀번호, API 키 등)
+#   - ConfigMap: 비밀 아닌 설정 ← 이 파일
+#   - Secret: 비밀 정보 (DB 비밀번호 등) → manifests/app/secret.yml
+#
+# 이 파일이 미치는 영향:
+#   - deployment.yml의 envFrom.configMapRef가 이 이름(sample-app-config)을 참조해
+#     아래 data의 key=value 전부를 Pod의 환경 변수로 주입한다.
+#   - 앱 코드(app/src/core/config.py)의 Settings가 환경 변수 APP_NAME, LOG_LEVEL 등을
+#     읽어 설정으로 사용한다 (pydantic-settings가 자동 매핑).
+#
+# 값 변경 시 주의:
+#   - ConfigMap을 수정해도 이미 떠 있는 Pod의 환경 변수는 바뀌지 않는다.
+#     `kubectl rollout restart deployment/sample-app -n seemedi-dev` 로
+#     Pod를 재시작해야 반영된다. (참고: docs/04-usage-guide.md — 7. ConfigMap/Secret 수정)
 # ============================================================================
-apiVersion: v1
+apiVersion: v1                 # ConfigMap은 core API 그룹(v1) 소속
 kind: ConfigMap
 metadata:
-  name: sample-app-config
-  namespace: seemedi-dev
+  name: sample-app-config      # deployment.yml의 configMapRef.name과 정확히 일치해야 함
+  namespace: seemedi-dev       # 참조하는 Deployment와 같은 네임스페이스여야 함
 data:
-  APP_NAME: "k8s-local-lab"
-  APP_VERSION: "0.1.0"
-  ENVIRONMENT: "local"
-  LOG_LEVEL: "INFO"
-  TZ: "Asia/Seoul"           # SEEMEDI 표준: KST 타임존
+  # 아래 키 이름들은 그대로 Pod의 환경 변수 이름이 된다.
+  APP_NAME: "k8s-local-lab"    # 앱 이름 — main.py의 로거 이름/루트 응답에 표시됨
+  APP_VERSION: "0.1.0"         # 앱 버전 — 루트(/) 응답에 표시됨
+  ENVIRONMENT: "local"         # 실행 환경 표시 — 프로덕션 overlay에서는 "prod"로 교체
+  LOG_LEVEL: "INFO"            # 로그 상세도 (DEBUG로 바꾸면 더 많은 로그 출력)
+  TZ: "Asia/Seoul"             # SEEMEDI 표준: KST 타임존 — 컨테이너 OS의 시간대 설정

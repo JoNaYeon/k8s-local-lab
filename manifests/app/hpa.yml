@@ -1,35 +1,48 @@
 # ============================================================================
-# HorizontalPodAutoscaler (HPA) — 부하에 따라 Pod 수를 자동 조절하는 리소스
+# [HorizontalPodAutoscaler (HPA)] — 부하에 따라 Pod 수를 자동 조절하는 리소스
 #
-# 비유: 마트 계산대
+# 비유: HPA = 마트 계산대 관리자 (참고: docs/02-key-concepts.md — 10. HPA)
 #   - 손님(트래픽)이 적으면 계산대(Pod) 2개만 운영
 #   - 손님이 몰리면 자동으로 계산대를 5개까지 늘림
 #   - 손님이 줄면 다시 2개로 줄임
 #
 # 동작 원리:
 #   1. metrics-server가 각 Pod의 CPU/메모리 사용률을 수집
-#   2. HPA가 평균 사용률을 확인
-#   3. 목표(70%)를 초과하면 Pod를 추가
-#   4. 목표 이하면 Pod를 제거
+#   2. HPA 컨트롤러가 주기적으로(기본 15초) 평균 사용률을 확인
+#   3. 목표(70%)를 초과하면 Deployment의 replicas를 늘림 (스케일 아웃)
+#   4. 목표보다 한참 낮으면 줄임 (스케일 인 — 급격한 축소를 막기 위해 몇 분 지연됨)
+#
+# DevOps 관점에서 왜 필요한가?
+#   - 트래픽 폭증 시 사람이 새벽에 일어나 수동으로 서버를 늘릴 필요가 없다.
+#   - 평상시에는 Pod를 줄여 리소스(=비용)를 절약한다.
+#   - 사용률(%)의 기준은 deployment.yml의 resources.requests.cpu(100m)다.
+#     예: Pod가 CPU 70m을 쓰면 사용률 70% → 스케일 아웃 발동.
+#
+# 상태 확인: kubectl get hpa -n seemedi-dev
+#   (참고: docs/04-usage-guide.md — 4. 스케일링)
 #
 # ⚠️ 로컬 k3d에서는 metrics-server가 기본 설치되어 있어 바로 동작한다.
+#    kubeadm 프로덕션에서는 metrics-server를 직접 설치해야 한다.
 # ============================================================================
-apiVersion: autoscaling/v2
+apiVersion: autoscaling/v2      # HPA v2 — CPU 외에 메모리/커스텀 메트릭도 지원하는 현행 버전
 kind: HorizontalPodAutoscaler
 metadata:
-  name: sample-app-hpa
-  namespace: seemedi-dev
+  name: sample-app-hpa          # HPA 리소스 이름
+  namespace: seemedi-dev        # 조절 대상 Deployment와 같은 네임스페이스여야 함
 spec:
+  # 어떤 리소스의 replicas를 조절할 것인가 — 대상 지정
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: sample-app              # 이 Deployment의 replicas를 조절
-  minReplicas: 2                  # 최소 2개
-  maxReplicas: 5                  # 최대 5개
+    name: sample-app            # deployment.yml의 metadata.name과 정확히 일치해야 함
+  # 주의: HPA가 활성화되면 deployment.yml의 replicas: 2는 사실상 무시되고
+  # HPA가 아래 범위 안에서 실제 개수를 결정한다.
+  minReplicas: 2                # 최소 2개 — 1개면 그 Pod가 죽는 순간 서비스 전면 중단
+  maxReplicas: 5                # 최대 5개 — 무한 증식으로 클러스터 자원 고갈되는 것을 방지
   metrics:
-    - type: Resource
+    - type: Resource            # 리소스(CPU/메모리) 기반 스케일링
       resource:
-        name: cpu
+        name: cpu               # CPU 사용률 기준
         target:
-          type: Utilization
-          averageUtilization: 70  # CPU 평균 사용률이 70% 초과하면 스케일 아웃
+          type: Utilization     # requests 대비 사용률(%)로 판단
+          averageUtilization: 70  # 전체 Pod 평균 CPU가 70%를 넘으면 Pod 추가

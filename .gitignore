@@ -1,14 +1,31 @@
-# OS
+# ============================================================================
+# .gitignore — git이 "추적하지 않을" 파일 목록
+#
+# ⚠️ 주의: .gitignore는 줄 끝 인라인 주석을 지원하지 않는다.
+#          (패턴 뒤에 #을 붙이면 # 이하까지 패턴의 일부로 인식되어 무시가 안 됨)
+#          설명은 반드시 이렇게 별도 줄에 적는다.
+#
+# DevOps 관점에서 왜 필요한가?
+#   - 비밀값(.env, kubeconfig)이 실수로 커밋되는 사고를 원천 차단한다.
+#     한 번 커밋된 비밀은 이력에 영원히 남아 유출로 간주해야 한다 (키 회전 필요).
+#   - 캐시/부산물이 레포에 섞이면 diff가 오염되고 용량이 커진다.
+# ============================================================================
+
+# ── OS가 자동 생성하는 파일 ─────────────────────────────────────────────────
+# .DS_Store: macOS 폴더 메타데이터 / Thumbs.db: Windows 썸네일 캐시
 .DS_Store
 Thumbs.db
 
-# IDE
+# ── IDE/편집기 개인 설정 (팀 공유 대상 아님) ────────────────────────────────
+# .idea: JetBrains(PyCharm 등) / .vscode: VS Code / *.swp, *.swo: vim 스왑 파일
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Python
+# ── Python 부산물 (실행 시 자동 재생성됨) ───────────────────────────────────
+# __pycache__: 바이트코드 캐시 / *.py[cod]: 컴파일 파일 / *.egg-info: 패키징 메타데이터
+# .venv, venv: 가상환경 (의존성은 requirements.txt로 공유) / .ruff_cache: 린터 캐시
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -16,20 +33,26 @@ __pycache__/
 venv/
 .ruff_cache/
 
-# Docker
+# ── Docker 부산물 ───────────────────────────────────────────────────────────
+# docker save 등으로 내보낸 이미지 파일 (용량 큼)
 *.tar
 
-# Kubernetes
+# ── Kubernetes 접속 정보 ────────────────────────────────────────────────────
+# kubeconfig에는 클러스터 인증서/토큰이 들어있다 — 유출 시 클러스터 장악 가능. 절대 커밋 금지
 kubeconfig*
 *.kubeconfig
 
-# Secrets (real values)
+# ── 비밀값 (실제 값이 든 파일) ──────────────────────────────────────────────
+# CLAUDE.md Security Rules: 실제 크레덴셜 커밋 금지, example 템플릿만 커밋.
+# ops.config.yml: 실제 조직 설정 (템플릿은 config/ops.config.yml.example)
+# !.env.example: 예시 템플릿은 커밋 허용 (맨 앞의 ! = 예외 규칙)
 config/ops.config.yml
 .env
 .env.*
 !.env.example
 
-# Terraform (if added later)
+# ── Terraform (나중에 IaC 추가 시 대비) ─────────────────────────────────────
+# .terraform: 프로바이더 캐시 / *.tfstate: 상태 파일 — 리소스 ID와 비밀값 포함, 커밋 금지
 .terraform/
 *.tfstate
 *.tfstate.backup

@@ -1,10 +1,25 @@
+# ============================================================================
+# [app Kustomization] — 샘플 앱 관련 매니페스트를 묶는 목차 파일
+#
+# 이 파일의 역할:
+#   - `kubectl apply -k manifests/app/` 실행 시 아래 6개 파일을 한 번에 적용한다.
+#   - Makefile의 `make deploy-app` 과 scripts/deploy-all.sh의 4단계가 이 디렉토리를 사용한다.
+#
+# DevOps 관점에서 왜 필요한가?
+#   - 앱을 구성하는 리소스(설정 → 비밀값 → 실행 → 네트워크 → 자동확장)를
+#     한 세트로 관리하면, 파일 하나를 빼먹고 배포하는 실수를 막을 수 있다.
+#   - 나열 순서는 의존 관계를 따른다: Deployment가 참조하는 ConfigMap/Secret을
+#     먼저 두어야 Pod가 뜰 때 환경 변수를 바로 찾을 수 있다.
+# ============================================================================
+
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# 배포할 파일 목록 (의존 순서대로 나열)
 resources:
-  - configmap.yml
-  - secret.yml
-  - deployment.yml
-  - service.yml
-  - ingress.yml
-  - hpa.yml
+  - configmap.yml     # 1) 비밀 아닌 설정값 — deployment.yml의 envFrom이 참조
+  - secret.yml        # 2) 비밀 설정값(DB 접속 문자열) — deployment.yml의 envFrom이 참조
+  - deployment.yml    # 3) 앱 Pod 실행 정의 (1,2를 환경 변수로 주입받음)
+  - service.yml       # 4) Pod에 고정 네트워크 주소 부여 — ingress.yml이 참조
+  - ingress.yml       # 5) 외부 HTTP 요청을 Service로 라우팅
+  - hpa.yml           # 6) 부하에 따라 deployment의 Pod 수 자동 조절

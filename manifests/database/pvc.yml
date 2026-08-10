@@ -1,27 +1,43 @@
 # ============================================================================
-# PersistentVolumeClaim (PVC) — 영구 저장소를 요청하는 리소스
+# [PersistentVolumeClaim (PVC)] — 영구 저장소를 "요청"하는 리소스
 #
-# 왜 PVC가 필요한가?
-#   - 컨테이너는 기본적으로 "휘발성" — 삭제하면 데이터도 사라진다
-#   - DB 데이터는 Pod가 재시작되어도 유지되어야 한다
-#   - PVC는 "이만큼의 디스크가 필요합니다"라고 요청하는 것
-#   - 쿠버네티스가 실제 스토리지(PV)를 할당해준다
+# 비유: PVC = 사물함 신청서 (참고: docs/02-key-concepts.md — 9. PVC)
+#   - PVC: "1GB짜리 사물함 하나 주세요" (요청서)
+#   - PV(PersistentVolume): 실제로 배정된 사물함 (실물)
+#   - 신청서를 내면 쿠버네티스가 실물을 배정해준다
 #
-# k3d에서는 local-path provisioner가 기본 제공되어
-# PVC를 만들면 자동으로 로컬 디스크에 PV가 생성된다.
+# 왜 PVC가 필요한가? (DevOps 관점)
+#   - 컨테이너의 파일시스템은 "휘발성" — 컨테이너가 삭제되면 데이터도 사라진다.
+#   - DB 데이터는 Pod가 재시작/재스케줄되어도 유지되어야 하므로,
+#     컨테이너 밖의 저장소(PV)에 데이터를 두고 PVC로 연결한다.
+#   - "요청(PVC)"과 "실물(PV)"을 분리하면 앱 매니페스트는 스토리지 구현을
+#     몰라도 된다. 로컬은 로컬 디스크, 프로덕션은 EBS — PVC 정의는 동일.
 #
-# 프로덕션에서는:
-#   - AWS EBS, Ceph, NFS 등의 스토리지 클래스를 사용
-#   - 백업/스냅샷 정책을 적용
+# 로컬(k3d)에서의 동작:
+#   - k3s에 내장된 local-path provisioner가 PVC를 감지하면
+#     노드의 로컬 디스크에 자동으로 PV를 만들어 연결한다 (동적 프로비저닝).
+#   - 단, 클러스터를 삭제(make clean)하면 데이터도 함께 사라진다.
+#
+# 프로덕션에서는: (참고: docs/05-production-mapping.md — 2. 스토리지)
+#   - storageClassName으로 AWS EBS, Ceph, NFS 등을 지정
+#   - 스냅샷/백업 정책을 반드시 적용
+#
+# 이 파일이 미치는 영향:
+#   - statefulset.yml의 volumes.persistentVolumeClaim.claimName이 이 이름
+#     (postgres-data)을 참조한다. 이 PVC가 없으면 postgres Pod는 Pending 상태로 멈춘다.
+#     (참고: docs/03-local-setup-guide.md — 문제 해결: Pod가 Pending 상태)
 # ============================================================================
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: postgres-data
-  namespace: seemedi-dev
+  name: postgres-data           # statefulset.yml의 claimName과 정확히 일치해야 함
+  namespace: seemedi-dev        # PVC는 네임스페이스 소속 — 사용하는 Pod와 같은 곳에 있어야 함
 spec:
+  # 접근 모드: 이 볼륨을 몇 개의 노드에서 어떻게 쓸 수 있는가
   accessModes:
-    - ReadWriteOnce             # 하나의 노드에서만 읽기/쓰기 가능
+    - ReadWriteOnce             # "하나의 노드"에서만 읽기/쓰기 가능 (블록 스토리지의 일반적 모드).
+                                # DB는 단일 인스턴스가 배타적으로 써야 하므로 이 모드가 적합하다.
+                                # 여러 노드 동시 접근이 필요하면 ReadWriteMany(NFS 등)를 쓴다.
   resources:
     requests:
-      storage: 1Gi              # 1 GiB 요청 (로컬 테스트이므로 작게)
+      storage: 1Gi              # 요청 용량 1 GiB — 로컬 테스트라 작게. 프로덕션에서는 증설 계획 필수

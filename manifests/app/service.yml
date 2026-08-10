@@ -1,32 +1,43 @@
 # ============================================================================
-# Service — Pod에 안정적인 네트워크 주소를 부여하는 리소스
+# [Service] — Pod에 안정적인 네트워크 주소를 부여하는 리소스
 #
-# 왜 Service가 필요한가?
-#   - Pod는 생성/삭제될 때마다 IP가 바뀐다
-#   - Service는 고정된 이름(DNS)과 IP를 제공한다
-#   - 여러 Pod에 트래픽을 분산(로드밸런싱)한다
+# 비유: Service = 회사의 "대표 전화번호" (참고: docs/02-key-concepts.md — 3. Service)
+#   - 직원(Pod)이 바뀌어도 대표번호(Service 주소)는 변하지 않는다
+#   - 전화가 오면 현재 근무 중인 직원 중 한 명에게 연결한다 (로드밸런싱)
 #
-# Service 타입:
-#   - ClusterIP (기본): 클러스터 내부에서만 접근 가능
-#   - NodePort: 노드의 특정 포트로 외부 접근 가능
-#   - LoadBalancer: 클라우드의 로드밸런서 연동 (프로덕션)
+# 왜 Service가 필요한가? (DevOps 관점)
+#   - Pod는 죽고 다시 만들어질 때마다 IP가 바뀐다. Pod IP로 직접 통신하면
+#     재시작 때마다 연결이 끊긴다.
+#   - Service는 고정된 DNS 이름을 제공하고, 뒤에 있는 Pod들로 트래픽을 분산한다.
+#   - readinessProbe(deployment.yml)에 실패한 Pod는 분배 대상에서 자동 제외된다.
 #
-# 이 Service는 ClusterIP 타입이다.
-# 클러스터 내부에서 "sample-app.seemedi-dev.svc.cluster.local:80"으로 접근할 수 있다.
-# 외부 접근은 Ingress가 담당한다.
+# Service 타입: (참고: docs/02-key-concepts.md — Service 타입 표)
+#   - ClusterIP (기본): 클러스터 내부에서만 접근 가능 ← 이 파일
+#   - NodePort: 노드의 특정 포트로 외부 접근 (개발/테스트용)
+#   - LoadBalancer: 클라우드 로드밸런서 연동 (프로덕션)
+#
+# 이 파일이 미치는 영향:
+#   - 클러스터 내부 주소: sample-app.seemedi-dev.svc.cluster.local:80
+#   - ingress.yml이 이 Service 이름(sample-app)과 포트(80)를 백엔드로 참조한다.
+#   - scripts/port-forward.sh가 `svc/sample-app 8000:80` 으로 이 Service를 사용한다.
 # ============================================================================
-apiVersion: v1
+apiVersion: v1                  # Service는 core API 그룹(v1) 소속
 kind: Service
 metadata:
-  name: sample-app
-  namespace: seemedi-dev
+  name: sample-app              # Service 이름 = 클러스터 내부 DNS 이름이 된다
+  namespace: seemedi-dev        # 앱과 같은 네임스페이스에 있어야 selector가 Pod를 찾는다
   labels:
-    app: sample-app
+    app: sample-app             # Service 자체의 분류 태그
 spec:
-  type: ClusterIP
+  type: ClusterIP               # 내부 전용 타입. 외부 노출은 Ingress가 담당한다 (역할 분리)
+  # "어떤 Pod에게 트래픽을 보낼 것인가" — 이 라벨을 가진 Pod가 대상.
+  # deployment.yml의 template.metadata.labels와 정확히 일치해야 한다.
+  # 불일치하면 Service는 존재하지만 연결할 Pod가 없어 접속이 안 된다 (흔한 장애 원인).
   selector:
-    app: sample-app             # 이 라벨을 가진 Pod에 트래픽을 보낸다
+    app: sample-app
   ports:
-    - port: 80                  # Service가 노출하는 포트
-      targetPort: 8000          # Pod의 실제 포트 (FastAPI)
-      protocol: TCP
+    - port: 80                  # Service가 노출하는 포트 — 다른 리소스가 접근할 때 쓰는 번호
+      targetPort: 8000          # 실제 Pod(컨테이너) 안에서 앱이 듣는 포트 (FastAPI, Dockerfile EXPOSE 8000)
+      protocol: TCP             # HTTP는 TCP 위에서 동작
+      # DevOps 관점: port(80)와 targetPort(8000)를 분리하면 앱 내부 포트가 바뀌어도
+      # Service를 쓰는 쪽(Ingress 등)은 계속 80만 바라보면 된다 (변경 영향 최소화).

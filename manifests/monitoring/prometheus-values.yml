@@ -1,39 +1,54 @@
 # ============================================================================
-# kube-prometheus-stack Helm values — 로컬 환경용 최소 설정
+# [Helm values] — kube-prometheus-stack 설치 옵션 (로컬 환경용 최소 설정)
 #
-# kube-prometheus-stack은 다음을 한 번에 설치한다:
-#   - Prometheus (메트릭 수집/저장)
-#   - Alertmanager (알림)
-#   - Grafana (대시보드) — 로컬에서는 비활성화
-#   - node-exporter (노드 메트릭)
-#   - kube-state-metrics (k8s 오브젝트 메트릭)
+# 이 파일은 쿠버네티스 매니페스트가 아니라 "Helm 차트에 넘기는 설정값"이다.
+#   - manifests/monitoring/install.sh가 `helm upgrade --install --values 이파일`로 사용한다.
+#   - Helm 차트는 이 값들로 수십 개의 쿠버네티스 YAML을 생성해 배포한다.
 #
-# 이 설정은 로컬 테스트용으로 리소스를 최소화했다.
-# 프로덕션에서는 스토리지, 보존 기간, 알림 규칙 등을 추가한다.
+# kube-prometheus-stack이 한 번에 설치하는 것들:
+#   - Prometheus (메트릭 수집/저장) — 시계열 DB. "지금 CPU가 몇 %인가"를 기록
+#   - Alertmanager (알림 발송) — 임계치 초과 시 Slack/메일 등으로 알림
+#   - Grafana (대시보드) — 로컬에서는 비활성화 (아래 참고)
+#   - node-exporter (노드 메트릭) — 각 노드의 CPU/메모리/디스크 상태 수집
+#   - kube-state-metrics (k8s 오브젝트 메트릭) — Pod 개수, 재시작 횟수 등 수집
+#
+# DevOps 관점에서 왜 필요한가?
+#   - "배포했으니 끝"이 아니라 "지금 잘 돌고 있는가"를 상시 확인해야 한다.
+#   - 장애가 난 뒤 로그를 뒤지는 것보다, 메트릭으로 이상 징후(메모리 증가,
+#     재시작 반복)를 먼저 감지하는 것이 운영의 기본이다.
+#
+# 이 설정은 로컬 노트북에서 부담 없이 돌도록 리소스를 최소화했다.
+# 프로덕션에서는 스토리지(PVC), 보존 기간 연장, 알림 규칙, Grafana를 추가한다.
+# (참고: docs/05-production-mapping.md — 모니터링 행)
 # ============================================================================
 
-# Grafana — 로컬에서는 비활성화 (리소스 절약)
+# ── Grafana: 대시보드 UI ────────────────────────────────────────────────────
+# 로컬에서는 비활성화 — 메모리 절약이 목적. Prometheus 자체 UI(localhost:9090)로
+# 조회는 가능하다. 프로덕션에서는 enabled: true로 켜고 대시보드를 구성한다.
 grafana:
   enabled: false
 
-# Alertmanager — 최소 설정
+# ── Alertmanager: 알림 발송기 ───────────────────────────────────────────────
 alertmanager:
-  enabled: true
+  enabled: true                  # 켜두면 알림 규칙 연습 가능 (수신 채널은 아직 미설정)
   alertmanagerSpec:
+    # 리소스 요청/제한 — 의미는 manifests/app/deployment.yml의 resources 주석 참고
     resources:
       requests:
-        cpu: "50m"
+        cpu: "50m"               # 알림기는 부하가 거의 없으므로 최소로
         memory: "64Mi"
       limits:
         cpu: "200m"
         memory: "128Mi"
 
-# Prometheus 서버 설정
+# ── Prometheus 서버 본체 설정 ───────────────────────────────────────────────
 prometheus:
   prometheusSpec:
-    # 로컬이므로 보존 기간 짧게
+    # 메트릭 보존 기간. 로컬은 24시간이면 충분 (디스크 절약).
+    # 프로덕션에서는 보통 15d~30d + 장기 보관은 Thanos/Mimir 등으로 확장.
     retention: 24h
-    # 리소스 제한
+    # 리소스 제한 — Prometheus는 수집 대상이 늘수록 메모리를 많이 쓴다.
+    # 로컬 상한 512Mi. 프로덕션에서는 수 GiB 단위로 산정한다.
     resources:
       requests:
         cpu: "100m"
@@ -41,14 +56,20 @@ prometheus:
       limits:
         cpu: "500m"
         memory: "512Mi"
-    # 모든 네임스페이스의 ServiceMonitor를 수집
+    # 아래 두 옵션(false)의 의미: "Helm이 만든 ServiceMonitor만 수집"이라는
+    # 기본 제한을 풀고, 모든 네임스페이스의 ServiceMonitor/PodMonitor를 수집한다.
+    # 이렇게 해야 나중에 seemedi-dev의 앱에 ServiceMonitor를 붙였을 때
+    # 별도 설정 없이 Prometheus가 자동으로 메트릭을 긁어간다.
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
 
-# node-exporter — 노드 메트릭 수집
+# ── node-exporter: 노드(서버) 하드웨어 메트릭 수집기 ────────────────────────
+# 각 노드에 하나씩 배포되어(DaemonSet) CPU/메모리/디스크/네트워크 상태를 노출한다.
 nodeExporter:
   enabled: true
 
-# kube-state-metrics — k8s 오브젝트 메트릭
+# ── kube-state-metrics: 쿠버네티스 오브젝트 상태 메트릭 ─────────────────────
+# "Pod가 몇 개인가", "재시작이 몇 번 일어났나" 같은 k8s 리소스 상태를 노출한다.
+# node-exporter가 "하드웨어" 담당이라면 이쪽은 "쿠버네티스 오브젝트" 담당.
 kubeStateMetrics:
   enabled: true

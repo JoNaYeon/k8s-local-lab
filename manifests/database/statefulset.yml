@@ -1,79 +1,104 @@
 # ============================================================================
-# StatefulSet — 상태를 가진 앱(DB 등)을 배포하는 리소스
+# [StatefulSet] — 상태를 가진 앱(DB 등)을 배포하는 리소스
 #
-# Deployment vs StatefulSet:
+# Deployment vs StatefulSet: (참고: docs/02-key-concepts.md — 8. StatefulSet)
 #   - Deployment: 상태 없는(stateless) 앱용 (웹 서버, API 등)
 #     → Pod 이름이 랜덤 (sample-app-7d8f9b6c4-x2k9p)
-#     → 어떤 Pod가 죽어도 새 Pod가 동일하게 동작
+#     → 어떤 Pod가 죽어도 새 Pod가 동일하게 동작 (자유석 사무실)
+#   - StatefulSet: 상태 있는(stateful) 앱용 (DB, 캐시, 메시지 큐)
+#     → Pod 이름이 순서대로 고정 (postgres-0, postgres-1, ...)
+#     → 각 Pod가 자기만의 저장소(PVC)를 가짐 (지정석 + 개인 사물함)
+#     → 순서대로 생성, 역순으로 삭제
 #
-#   - StatefulSet: 상태 있는(stateful) 앱용 (DB, 캐시 등)
-#     → Pod 이름이 순서대로 (postgres-0, postgres-1, ...)
-#     → 각 Pod가 고유한 저장소(PVC)를 가짐
-#     → 순서대로 생성/삭제 (0번 먼저 시작, 마지막부터 삭제)
+# 왜 PostgreSQL은 StatefulSet인가? (DevOps 관점)
+#   - DB는 데이터를 디스크에 저장한다. Pod가 재시작되어도 "같은 Pod가 같은
+#     디스크를 다시 잡아야" 데이터가 유지된다. Deployment는 이를 보장하지 못한다.
+#   - postgres-0이라는 고정 이름 덕분에 접속/디버깅도 예측 가능하다:
+#     kubectl exec -it postgres-0 -n seemedi-dev -- psql -U seemedi -d seemedi
+#     (참고: docs/04-usage-guide.md — 3. PostgreSQL 접속)
 #
-# PostgreSQL은 데이터를 디스크에 저장하므로 StatefulSet을 사용한다.
+# 프로덕션에서는: RDS(관리형) 또는 Patroni 기반 HA PostgreSQL로 대체.
+# (참고: docs/05-production-mapping.md — 5. DB)
 # ============================================================================
-apiVersion: apps/v1
+apiVersion: apps/v1               # StatefulSet도 Deployment처럼 apps/v1 그룹 소속
 kind: StatefulSet
 metadata:
-  name: postgres
-  namespace: seemedi-dev
+  name: postgres                  # Pod 이름의 접두사가 된다 → postgres-0
+  namespace: seemedi-dev          # 앱과 같은 네임스페이스 — 앱이 짧은 DNS 이름(postgres)으로 접근 가능
   labels:
     app: postgres
 spec:
-  serviceName: postgres           # Headless Service 이름과 일치해야 함
-  replicas: 1                     # 로컬이므로 1개만
+  # StatefulSet 필수 필드: 함께 쓸 Headless Service 이름 (service.yml의 metadata.name).
+  # 이 조합으로 postgres-0.postgres.seemedi-dev.svc.cluster.local 같은
+  # "Pod별 고정 DNS 이름"이 만들어진다.
+  serviceName: postgres
+  replicas: 1                     # 로컬 학습용이므로 1개만. HA 구성은 프로덕션에서 (Patroni 등)
   selector:
     matchLabels:
-      app: postgres
-  template:
+      app: postgres               # 아래 template의 라벨과 일치해야 함 (Deployment와 동일한 규칙)
+  template:                       # Pod 설계도
     metadata:
       labels:
-        app: postgres
+        app: postgres             # service.yml의 selector와 deploy-all.sh의 `-l app=postgres` 대기 명령이 이 라벨을 사용
     spec:
       containers:
         - name: postgres
-          image: postgres:15-alpine     # 경량 Alpine 기반, 버전 고정 (latest 금지)
+          # 공식 PostgreSQL 15, Alpine(초경량 리눅스) 기반 이미지.
+          # 버전을 고정(15-alpine)하는 이유: :latest를 쓰면 어느 날 갑자기
+          # 메이저 버전이 올라가 데이터 호환성이 깨질 수 있다 (재현 가능성 원칙).
+          image: postgres:15-alpine
           ports:
-            - containerPort: 5432
+            - containerPort: 5432       # PostgreSQL 표준 포트
               protocol: TCP
 
           # ── 환경 변수 ─────────────────────────────────────────────────
+          # postgres 공식 이미지는 환경 변수(POSTGRES_DB/USER/PASSWORD)로
+          # 최초 기동 시 DB와 사용자를 자동 생성한다.
           envFrom:
             - configMapRef:
-                name: postgres-config
+                name: postgres-config   # database/configmap.yml — POSTGRES_DB, POSTGRES_USER
             - secretRef:
-                name: postgres-secret
+                name: postgres-secret   # database/secret.yml — POSTGRES_PASSWORD
 
           env:
+            # PGDATA: 실제 데이터 파일 위치. 마운트 지점(/var/lib/postgresql/data)의
+            # 바로 아래가 아닌 하위 디렉토리(pgdata)를 쓰는 이유:
+            # 일부 스토리지는 마운트 루트에 lost+found 등을 만들어 postgres 초기화가
+            # "디렉토리가 비어있지 않음" 에러로 실패하기 때문 (공식 이미지 권장 패턴).
             - name: PGDATA
-              value: /var/lib/postgresql/data/pgdata   # 데이터 디렉토리
+              value: /var/lib/postgresql/data/pgdata
             - name: TZ
-              value: "Asia/Seoul"
+              value: "Asia/Seoul"       # SEEMEDI 표준: KST — DB 로그 시각도 한국 시간으로 기록
 
-          # ── 볼륨 마운트 ───────────────────────────────────────────────
+          # ── 볼륨 마운트 (컨테이너 안에서 볼륨을 어디에 붙일지) ─────────
           volumeMounts:
-            - name: postgres-data
-              mountPath: /var/lib/postgresql/data       # DB 데이터 저장 위치
-            - name: initdb
-              mountPath: /docker-entrypoint-initdb.d    # 초기화 SQL 위치
+            - name: postgres-data                       # 아래 volumes의 postgres-data와 연결
+              mountPath: /var/lib/postgresql/data       # DB 데이터 저장 위치 — 여기 쓴 데이터만 Pod 재시작 후에도 살아남는다
+            - name: initdb                              # 아래 volumes의 initdb와 연결
+              mountPath: /docker-entrypoint-initdb.d    # postgres 공식 이미지가 "최초 1회" 이 폴더의 SQL을 자동 실행
 
-          # ── 리소스 제한 ───────────────────────────────────────────────
+          # ── 리소스 요청/제한 (의미는 app/deployment.yml 주석 참고) ────
           resources:
             requests:
-              cpu: "100m"
-              memory: "256Mi"
+              cpu: "100m"               # 최소 0.1 코어 보장
+              memory: "256Mi"           # DB는 앱보다 메모리를 더 쓰므로 앱(128Mi)보다 크게
             limits:
               cpu: "500m"
-              memory: "512Mi"
+              memory: "512Mi"           # 초과 시 OOMKill — 로컬 학습용 상한
 
+      # ── 볼륨 정의 (Pod에서 사용할 저장소 목록) ──────────────────────────
       volumes:
+        # 1) DB 데이터용 영구 볼륨: pvc.yml에서 요청한 PVC를 연결.
+        #    replicas가 1이라 PVC를 직접 참조했다. 여러 replica가 필요하면
+        #    volumeClaimTemplates로 바꿔 Pod마다 PVC를 자동 생성하게 한다.
         - name: postgres-data
           persistentVolumeClaim:
-            claimName: postgres-data          # pvc.yml에서 정의한 PVC
+            claimName: postgres-data          # pvc.yml의 metadata.name과 일치해야 함
+        # 2) 초기화 SQL: ConfigMap의 특정 키(initdb.sql)를 파일로 변환해 마운트.
+        #    ConfigMap은 환경 변수뿐 아니라 이렇게 "파일"로도 주입할 수 있다.
         - name: initdb
           configMap:
             name: postgres-config
             items:
-              - key: initdb.sql
-                path: initdb.sql              # ConfigMap의 initdb.sql을 파일로 마운트
+              - key: initdb.sql               # ConfigMap 안의 키 이름
+                path: initdb.sql              # 컨테이너에 만들어질 파일 이름 → /docker-entrypoint-initdb.d/initdb.sql

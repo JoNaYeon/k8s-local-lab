@@ -1,9 +1,28 @@
+# ============================================================================
+# [database Kustomization] — PostgreSQL 관련 매니페스트를 묶는 목차 파일
+#
+# 이 파일의 역할:
+#   - `kubectl apply -k manifests/database/` 실행 시 아래 5개 파일을 한 번에 적용한다.
+#   - Makefile의 `make deploy-db` 와 scripts/deploy-all.sh의 3단계가 이 디렉토리를 사용한다.
+#
+# DevOps 관점에서 왜 필요한가?
+#   - DB를 구성하는 리소스(설정 → 비밀번호 → 저장소 → 실행 → 네트워크)를
+#     한 세트로 관리한다. 특히 PVC(저장소)를 빼먹으면 DB 데이터가 휘발되므로
+#     세트로 묶는 것이 안전하다.
+#   - 나열 순서는 의존 관계를 따른다: StatefulSet이 참조하는
+#     ConfigMap/Secret/PVC를 먼저 둔다.
+#
+# 프로덕션에서는 이 디렉토리 전체가 관리형 DB(AWS RDS)로 대체될 수 있다.
+# (참고: docs/05-production-mapping.md — 5. DB)
+# ============================================================================
+
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# 배포할 파일 목록 (의존 순서대로 나열)
 resources:
-  - configmap.yml
-  - secret.yml
-  - pvc.yml
-  - statefulset.yml
-  - service.yml
+  - configmap.yml     # 1) DB 이름/사용자 + 초기화 SQL — statefulset.yml이 참조
+  - secret.yml        # 2) DB 비밀번호 — statefulset.yml이 참조
+  - pvc.yml           # 3) 데이터 영구 저장소 요청 — statefulset.yml이 마운트
+  - statefulset.yml   # 4) PostgreSQL 컨테이너 실행 정의 (1,2,3을 모두 사용)
+  - service.yml       # 5) DB에 접근할 고정 DNS 이름(postgres) 제공

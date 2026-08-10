@@ -1,21 +1,42 @@
 # ============================================================================
-# Namespace — 쿠버네티스에서 리소스를 논리적으로 격리하는 단위
+# [Namespace] — 쿠버네티스에서 리소스를 논리적으로 격리하는 단위
 #
-# 왜 네임스페이스를 나누는가?
-#   - 앱과 모니터링 리소스를 분리하면 관리가 편하다
-#   - 프로덕션에서는 팀/서비스/환경별로 네임스페이스를 분리한다
-#   - RBAC(권한 제어)을 네임스페이스 단위로 적용할 수 있다
+# 비유: 네임스페이스 = 건물의 "층"
+#   - 1층(seemedi-dev)에는 앱과 DB, 2층(monitoring)에는 모니터링 도구.
+#   - 같은 층 안에서는 이름만으로 서로를 찾을 수 있고,
+#     층이 다르면 전체 주소(서비스명.네임스페이스)가 필요하다.
+#   (참고: docs/02-key-concepts.md — 5. Namespace)
+#
+# 왜 네임스페이스를 나누는가? (DevOps 관점)
+#   - 앱과 모니터링 리소스를 분리하면 조회/삭제/관리 범위가 명확해진다.
+#     예: `kubectl get all -n seemedi-dev` 는 앱 관련 리소스만 보여준다.
+#   - 프로덕션에서는 팀/서비스/환경(dev, staging, prod)별로 분리한다.
+#     (참고: docs/05-production-mapping.md — 네임스페이스 행)
+#   - RBAC(권한 제어)을 네임스페이스 단위로 적용할 수 있다.
+#     예: "개발자는 dev 네임스페이스만 수정 가능" 같은 정책.
+#
+# 이 파일이 미치는 영향:
+#   - 여기서 만든 seemedi-dev 이름은 manifests/app/*, manifests/database/* 의
+#     모든 리소스가 metadata.namespace로 참조한다. 이 파일이 먼저 적용되지 않으면
+#     다른 매니페스트는 전부 "namespace not found" 에러로 실패한다.
 # ============================================================================
-apiVersion: v1
-kind: Namespace
+
+# ── 네임스페이스 1: 앱 + DB ────────────────────────────────────────────────
+apiVersion: v1               # Namespace는 쿠버네티스의 가장 기본(core) API 그룹(v1) 소속
+kind: Namespace              # 이 문서가 정의하는 리소스의 종류
 metadata:
-  name: seemedi-dev          # 앱 + DB가 배포될 네임스페이스
+  name: seemedi-dev          # 네임스페이스 이름 — 앱/DB 매니페스트의 namespace 필드와 정확히 일치해야 함
   labels:
-    purpose: application     # 라벨: 리소스를 분류하는 태그 (key: value)
+    # 라벨: 리소스에 붙이는 분류 태그 (key: value 형식, 자유롭게 정의 가능).
+    # `kubectl get ns -l purpose=application` 처럼 라벨로 골라서 조회할 수 있다.
+    purpose: application     # "이 네임스페이스는 애플리케이션 용도"라는 표시
 ---
+# ── 네임스페이스 2: 모니터링 ───────────────────────────────────────────────
+# `---` 는 YAML에서 "여기서부터 새 문서"라는 구분선. 한 파일에 여러 리소스를 담을 때 쓴다.
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: monitoring           # Prometheus 등 모니터링 도구가 배포될 네임스페이스
+  name: monitoring           # Prometheus 등이 설치될 네임스페이스.
+                             # manifests/monitoring/install.sh 가 이 이름을 사용한다.
   labels:
-    purpose: observability
+    purpose: observability   # "관측(모니터링) 용도"라는 표시

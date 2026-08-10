@@ -1,84 +1,120 @@
 # ============================================================================
-# Deployment — 앱의 "원하는 상태"를 선언하는 리소스
+# [Deployment] — 앱의 "원하는 상태"를 선언하는 리소스
 #
-# Deployment가 하는 일:
-#   1. 지정한 수(replicas)만큼 Pod를 유지한다
-#   2. Pod가 죽으면 자동으로 새 Pod를 생성한다
-#   3. 이미지가 바뀌면 롤링 업데이트로 무중단 배포한다
+# Deployment가 하는 일: (참고: docs/02-key-concepts.md — 2. Deployment)
+#   1. 지정한 수(replicas)만큼 Pod를 항상 유지한다
+#   2. Pod가 죽으면 자동으로 새 Pod를 생성한다 (자동 복구)
+#   3. 이미지가 바뀌면 한 개씩 교체하는 "롤링 업데이트"로 무중단 배포한다
 #   4. 문제가 생기면 이전 버전으로 롤백할 수 있다
+#      (`kubectl rollout undo deployment/sample-app -n seemedi-dev`,
+#       참고: docs/04-usage-guide.md — 5. 롤링 업데이트와 롤백)
 #
-# Pod란?
+# Pod란? (참고: docs/02-key-concepts.md — 1. Pod)
 #   - 쿠버네티스에서 배포하는 가장 작은 단위
-#   - 하나 이상의 컨테이너를 감싸는 껍데기
+#   - 하나 이상의 컨테이너를 감싸는 껍데기 (보통 1 Pod = 1 컨테이너)
 #   - 같은 Pod 안의 컨테이너는 네트워크(localhost)를 공유한다
+#   - Pod는 일회용이다. 직접 만들지 않고 이 Deployment가 만들고 관리한다.
+#
+# 이 파일이 미치는 영향:
+#   - 여기서 정의한 라벨(app: sample-app)을 service.yml의 selector와
+#     Makefile의 `make logs` (-l app=sample-app)가 참조한다.
+#   - hpa.yml이 이 Deployment의 이름(sample-app)을 참조해 replicas를 조절한다.
+#   - 이미지 이름(sample-app:local)은 Makefile의 APP_IMAGE 변수와 일치해야 한다.
 # ============================================================================
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: apps/v1                     # Deployment는 apps API 그룹의 v1 버전에 정의되어 있다
+kind: Deployment                        # 리소스 종류
 metadata:
-  name: sample-app
-  namespace: seemedi-dev
+  name: sample-app                      # Deployment 이름 — hpa.yml, Makefile(deploy-app), kubectl 명령에서 이 이름으로 참조
+  namespace: seemedi-dev                # 배포될 네임스페이스 (manifests/base/namespaces.yml에서 생성됨)
   labels:
-    app: sample-app
+    app: sample-app                     # Deployment 자체에 붙는 분류 태그
 spec:
-  replicas: 2                           # Pod 2개를 항상 유지
+  # 유지할 Pod 개수. 2개인 이유: 1개가 죽거나 업데이트 중이어도 나머지 1개가
+  # 트래픽을 받아 무중단이 된다. 단, hpa.yml이 있으면 HPA가 이 값을 2~5 사이로 덮어쓴다.
+  replicas: 2
+
+  # "어떤 Pod가 내 관리 대상인가"를 정하는 조건.
+  # 아래 template의 라벨과 반드시 일치해야 한다 (불일치하면 배포 자체가 거부됨).
   selector:
     matchLabels:
-      app: sample-app                   # 이 라벨을 가진 Pod를 관리
-  template:                             # Pod 템플릿 — 이 설정대로 Pod를 생성
+      app: sample-app
+
+  # Pod 템플릿 — Deployment는 이 설계도대로 Pod를 찍어낸다.
+  # 이 안의 내용이 바뀌면(예: 이미지 변경) 롤링 업데이트가 자동으로 시작된다.
+  template:
     metadata:
       labels:
-        app: sample-app
+        app: sample-app                 # 생성될 Pod에 붙는 라벨. Service/HPA/logs가 이 라벨로 Pod를 찾는다
     spec:
       # ── 보안 설정 ──────────────────────────────────────────────────────
+      # DevOps 관점: 컨테이너가 뚫려도(해킹) root 권한이 없으면 피해가 제한된다.
+      # "최소 권한 원칙" — 프로덕션 필수 설정이며 로컬에서도 동일하게 연습한다.
       securityContext:
-        runAsNonRoot: true              # root로 실행 금지
-        runAsUser: 1001                 # Dockerfile의 appuser UID
-        runAsGroup: 1001
-        fsGroup: 1001
+        runAsNonRoot: true              # root(UID 0)로 실행되는 컨테이너는 기동 자체를 거부
+        runAsUser: 1001                 # app/Dockerfile에서 만든 appuser의 UID와 일치해야 함
+        runAsGroup: 1001                # appuser의 GID
+        fsGroup: 1001                   # 마운트된 볼륨 파일의 소유 그룹 (파일 접근 권한 보장)
 
       containers:
-        - name: app
-          image: sample-app:local       # k3d에 import한 로컬 이미지
-          imagePullPolicy: Never        # 외부 레지스트리에서 pull하지 않음 (로컬 이미지 사용)
+        - name: app                     # Pod 안에서 이 컨테이너를 부르는 이름 (로그 조회 시 사용)
+          # 실행할 Docker 이미지. `make build`로 빌드하고 `make load`로
+          # k3d 클러스터 안에 넣어둔 로컬 이미지다 (외부 레지스트리에 없음).
+          image: sample-app:local
+          # Never = 절대 외부에서 이미지를 내려받지(pull) 않음.
+          # 로컬 이미지는 레지스트리에 없으므로, 이 설정이 없으면 pull을 시도하다
+          # ImagePullBackOff 에러가 난다. (참고: docs/03-local-setup-guide.md — 문제 해결)
+          # 프로덕션에서는 레지스트리(GHCR/ECR)를 쓰므로 이 설정을 제거한다.
+          imagePullPolicy: Never
           ports:
-            - containerPort: 8000
+            - containerPort: 8000       # 앱(FastAPI/uvicorn)이 듣고 있는 포트. Dockerfile의 EXPOSE 8000과 동일
               protocol: TCP
 
-          # ── 환경 변수: ConfigMap에서 가져오기 ──────────────────────────
+          # ── 환경 변수 주입 ────────────────────────────────────────────
+          # envFrom: ConfigMap/Secret의 모든 key=value를 통째로 환경 변수로 넣는다.
+          # 앱 코드(app/src/core/config.py)는 이 환경 변수를 읽어 설정을 구성한다.
+          # DevOps 관점: 설정을 이미지 밖으로 빼면(12-Factor App) 같은 이미지를
+          # 로컬/스테이징/프로덕션에서 값만 바꿔 재사용할 수 있다.
           envFrom:
             - configMapRef:
-                name: sample-app-config   # configmap.yml에서 정의한 ConfigMap
+                name: sample-app-config   # manifests/app/configmap.yml에서 정의 (APP_NAME, LOG_LEVEL 등)
             - secretRef:
-                name: sample-app-secret   # secret.yml에서 정의한 Secret
+                name: sample-app-secret   # manifests/app/secret.yml에서 정의 (DATABASE_URL)
 
-          # ── Liveness Probe ────────────────────────────────────────────
-          # "이 Pod가 살아있는가?"
-          # 실패하면 → Pod를 재시작
+          # ── Liveness Probe: "이 Pod가 살아있는가?" ────────────────────
+          # 쿠버네티스가 주기적으로 GET /healthz 를 호출한다 (app/src/main.py의 healthz 함수).
+          # 실패가 반복되면 → 컨테이너를 죽이고 재시작한다.
+          # DevOps 관점: 앱이 멈춰있어도(데드락 등) 사람이 개입하지 않고 자동 복구된다.
           livenessProbe:
             httpGet:
-              path: /healthz
-              port: 8000
-            initialDelaySeconds: 5        # 앱 시작 후 5초 대기
-            periodSeconds: 10             # 10초마다 확인
-            failureThreshold: 3           # 3번 연속 실패하면 재시작
+              path: /healthz            # 호출할 경로
+              port: 8000                # 호출할 포트
+            initialDelaySeconds: 5      # 컨테이너 시작 후 5초 기다렸다가 검사 시작 (앱 기동 시간 확보)
+            periodSeconds: 10           # 10초마다 검사
+            failureThreshold: 3         # 3번 연속 실패하면 재시작 (일시적 오류로 인한 오탐 방지)
 
-          # ── Readiness Probe ───────────────────────────────────────────
-          # "이 Pod가 트래픽을 받을 준비가 되었는가?"
-          # 실패하면 → Service에서 제외 (트래픽 안 보냄)
+          # ── Readiness Probe: "트래픽을 받을 준비가 되었는가?" ─────────
+          # GET /readyz 호출 (app/src/main.py의 readyz 함수).
+          # 실패하면 → Pod를 죽이지는 않고, Service의 분배 대상에서만 제외한다.
+          # DevOps 관점: 앱이 아직 준비 안 됐을 때(기동 중, DB 연결 중) 사용자 요청이
+          # 들어와 에러가 나는 것을 막는다. 롤링 업데이트 시 무중단의 핵심 장치.
           readinessProbe:
             httpGet:
               path: /readyz
               port: 8000
-            initialDelaySeconds: 3
-            periodSeconds: 5
+            initialDelaySeconds: 3      # 시작 3초 후부터 검사
+            periodSeconds: 5            # 5초마다 검사 (liveness보다 짧게 — 트래픽 제어는 민감하게)
 
-          # ── 리소스 제한 ───────────────────────────────────────────────
-          # requests: 최소 보장 리소스 (스케줄링 기준)
-          # limits: 최대 사용 가능 리소스 (초과하면 OOMKill)
+          # ── 리소스 요청/제한 ──────────────────────────────────────────
+          # requests: "최소 이만큼은 보장해달라" — 스케줄러가 Pod를 어느 노드에
+          #           배치할지 결정하는 기준. hpa.yml의 CPU 사용률(%)도 이 값 기준이다.
+          # limits:   "최대 이만큼만 쓸 수 있다" — CPU 초과 시 속도 제한(throttle),
+          #           메모리 초과 시 강제 종료(OOMKill).
+          # DevOps 관점: 이 값이 없으면 한 앱이 노드 자원을 독식해 다른 앱까지
+          # 죽일 수 있다. 프로덕션에서는 반드시 설정한다.
           resources:
             requests:
-              cpu: "100m"               # 0.1 CPU core
-              memory: "128Mi"           # 128 MiB
+              cpu: "100m"               # 100 밀리코어 = 0.1 CPU 코어
+              memory: "128Mi"           # 128 MiB 보장
             limits:
-              cpu: "500m"               # 0.5 CPU core
-              memory: "256Mi"           # 256 MiB
+              cpu: "500m"               # 최대 0.5 CPU 코어
+              memory: "256Mi"           # 최대 256 MiB (초과하면 OOMKill로 컨테이너 재시작)

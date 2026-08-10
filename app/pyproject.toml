@@ -1,11 +1,28 @@
+# ============================================================================
+# pyproject.toml — Python 프로젝트 메타데이터와 개발 도구 설정
+#
+# 이 파일의 역할:
+#   - [project]: 프로젝트 이름/버전/파이썬 요구 버전 선언
+#   - [tool.ruff]: 린터(ruff) 규칙 — CI(.github/workflows/ci.yml)의
+#     "ruff check app/" 스텝이 이 설정을 읽어 검사한다
+#
+# DevOps 관점: 린터 설정을 레포에 커밋하는 이유
+#   - 팀원/CI가 모두 "같은 규칙"으로 검사한다 — 내 편집기에서는 통과했는데
+#     CI에서 실패하는 불일치를 없앤다.
+# ============================================================================
+
 [project]
-name = "k8s-local-lab-app"
-version = "0.1.0"
-requires-python = ">=3.12"
+name = "k8s-local-lab-app"      # 패키지 이름
+version = "0.1.0"               # 앱 버전 (configmap.yml의 APP_VERSION과 맞춰 관리)
+requires-python = ">=3.12"      # 최소 파이썬 버전 — Dockerfile 베이스(python:3.12-slim)와 일치
 
 [tool.ruff]
-line-length = 100
-target-version = "py312"
+line-length = 100               # 한 줄 최대 100자 (SMEDI 표준 — CLAUDE.md Conventions)
+target-version = "py312"        # 3.12 문법 기준으로 검사
 
 [tool.ruff.lint]
+# 활성화할 검사 규칙 그룹:
+#   E = pycodestyle 오류 (들여쓰기, 공백 등 스타일)
+#   F = pyflakes (미사용 변수, 정의 안 된 이름 등 실제 버그성 문제)
+#   I = isort (import 문 정렬 순서)
 select = ["E", "F", "I"]
