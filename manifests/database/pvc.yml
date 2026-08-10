@@ -1,0 +1,27 @@
+# ============================================================================
+# PersistentVolumeClaim (PVC) — 영구 저장소를 요청하는 리소스
+#
+# 왜 PVC가 필요한가?
+#   - 컨테이너는 기본적으로 "휘발성" — 삭제하면 데이터도 사라진다
+#   - DB 데이터는 Pod가 재시작되어도 유지되어야 한다
+#   - PVC는 "이만큼의 디스크가 필요합니다"라고 요청하는 것
+#   - 쿠버네티스가 실제 스토리지(PV)를 할당해준다
+#
+# k3d에서는 local-path provisioner가 기본 제공되어
+# PVC를 만들면 자동으로 로컬 디스크에 PV가 생성된다.
+#
+# 프로덕션에서는:
+#   - AWS EBS, Ceph, NFS 등의 스토리지 클래스를 사용
+#   - 백업/스냅샷 정책을 적용
+# ============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: seemedi-dev
+spec:
+  accessModes:
+    - ReadWriteOnce             # 하나의 노드에서만 읽기/쓰기 가능
+  resources:
+    requests:
+      storage: 1Gi              # 1 GiB 요청 (로컬 테스트이므로 작게)

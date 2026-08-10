@@ -1,0 +1,37 @@
+# ============================================================================
+# Ingress — 클러스터 외부에서 내부 Service로 HTTP 트래픽을 라우팅하는 리소스
+#
+# 비유: Ingress는 건물의 "안내 데스크"
+#   - 외부 방문자(HTTP 요청)가 들어오면
+#   - 도메인 이름과 경로를 보고
+#   - 맞는 Service(부서)로 안내한다
+#
+# 이 설정:
+#   - app.localhost → sample-app Service로 라우팅
+#   - k3d 환경에서 localhost:80으로 접근 가능
+#
+# 프로덕션에서는:
+#   - 실제 도메인 사용 (예: app.seemedi.dev)
+#   - TLS(HTTPS) 인증서 추가
+#   - Nginx Ingress Controller 또는 AWS ALB Ingress 사용
+# ============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sample-app-ingress
+  namespace: seemedi-dev
+  annotations:
+    # Nginx Ingress Controller가 처리
+    ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+    - host: app.localhost             # 이 도메인으로 들어오는 요청을
+      http:
+        paths:
+          - path: /                   # 모든 경로에 대해
+            pathType: Prefix
+            backend:
+              service:
+                name: sample-app      # sample-app Service로 보낸다
+                port:
+                  number: 80

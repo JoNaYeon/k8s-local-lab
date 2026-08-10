@@ -1,0 +1,54 @@
+# ============================================================================
+# kube-prometheus-stack Helm values — 로컬 환경용 최소 설정
+#
+# kube-prometheus-stack은 다음을 한 번에 설치한다:
+#   - Prometheus (메트릭 수집/저장)
+#   - Alertmanager (알림)
+#   - Grafana (대시보드) — 로컬에서는 비활성화
+#   - node-exporter (노드 메트릭)
+#   - kube-state-metrics (k8s 오브젝트 메트릭)
+#
+# 이 설정은 로컬 테스트용으로 리소스를 최소화했다.
+# 프로덕션에서는 스토리지, 보존 기간, 알림 규칙 등을 추가한다.
+# ============================================================================
+
+# Grafana — 로컬에서는 비활성화 (리소스 절약)
+grafana:
+  enabled: false
+
+# Alertmanager — 최소 설정
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "128Mi"
+
+# Prometheus 서버 설정
+prometheus:
+  prometheusSpec:
+    # 로컬이므로 보존 기간 짧게
+    retention: 24h
+    # 리소스 제한
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+    # 모든 네임스페이스의 ServiceMonitor를 수집
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+
+# node-exporter — 노드 메트릭 수집
+nodeExporter:
+  enabled: true
+
+# kube-state-metrics — k8s 오브젝트 메트릭
+kubeStateMetrics:
+  enabled: true

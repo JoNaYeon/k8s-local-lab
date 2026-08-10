@@ -1,0 +1,79 @@
+# ============================================================================
+# StatefulSet — 상태를 가진 앱(DB 등)을 배포하는 리소스
+#
+# Deployment vs StatefulSet:
+#   - Deployment: 상태 없는(stateless) 앱용 (웹 서버, API 등)
+#     → Pod 이름이 랜덤 (sample-app-7d8f9b6c4-x2k9p)
+#     → 어떤 Pod가 죽어도 새 Pod가 동일하게 동작
+#
+#   - StatefulSet: 상태 있는(stateful) 앱용 (DB, 캐시 등)
+#     → Pod 이름이 순서대로 (postgres-0, postgres-1, ...)
+#     → 각 Pod가 고유한 저장소(PVC)를 가짐
+#     → 순서대로 생성/삭제 (0번 먼저 시작, 마지막부터 삭제)
+#
+# PostgreSQL은 데이터를 디스크에 저장하므로 StatefulSet을 사용한다.
+# ============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: seemedi-dev
+  labels:
+    app: postgres
+spec:
+  serviceName: postgres           # Headless Service 이름과 일치해야 함
+  replicas: 1                     # 로컬이므로 1개만
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine     # 경량 Alpine 기반, 버전 고정 (latest 금지)
+          ports:
+            - containerPort: 5432
+              protocol: TCP
+
+          # ── 환경 변수 ─────────────────────────────────────────────────
+          envFrom:
+            - configMapRef:
+                name: postgres-config
+            - secretRef:
+                name: postgres-secret
+
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata   # 데이터 디렉토리
+            - name: TZ
+              value: "Asia/Seoul"
+
+          # ── 볼륨 마운트 ───────────────────────────────────────────────
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data       # DB 데이터 저장 위치
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d    # 초기화 SQL 위치
+
+          # ── 리소스 제한 ───────────────────────────────────────────────
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-data          # pvc.yml에서 정의한 PVC
+        - name: initdb
+          configMap:
+            name: postgres-config
+            items:
+              - key: initdb.sql
+                path: initdb.sql              # ConfigMap의 initdb.sql을 파일로 마운트

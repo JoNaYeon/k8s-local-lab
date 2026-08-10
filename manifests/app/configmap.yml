@@ -1,0 +1,23 @@
+# ============================================================================
+# ConfigMap — 비밀이 아닌 설정값을 저장하는 쿠버네티스 리소스
+#
+# 왜 ConfigMap을 쓰는가?
+#   - 설정을 코드에서 분리한다 (12-Factor App 원칙)
+#   - 이미지를 다시 빌드하지 않고도 설정을 변경할 수 있다
+#   - 환경별(local/staging/prod) 다른 값을 넣을 수 있다
+#
+# ConfigMap vs Secret:
+#   - ConfigMap: 비밀이 아닌 설정 (앱 이름, 로그 레벨, 타임존 등)
+#   - Secret: 비밀 정보 (DB 비밀번호, API 키 등)
+# ============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sample-app-config
+  namespace: seemedi-dev
+data:
+  APP_NAME: "k8s-local-lab"
+  APP_VERSION: "0.1.0"
+  ENVIRONMENT: "local"
+  LOG_LEVEL: "INFO"
+  TZ: "Asia/Seoul"           # SEEMEDI 표준: KST 타임존

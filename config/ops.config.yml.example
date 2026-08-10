@@ -1,0 +1,28 @@
+# ============================================================================
+# ops.config.yml — 조직별 설정값 (ai-ops-harness 형식)
+#
+# 이 파일을 ops.config.yml로 복사하고 실제 값을 채워 사용한다.
+# ops.config.yml은 .gitignore에 포함되어 git에 커밋되지 않는다.
+# ============================================================================
+org:
+  team_name: "seemedi"
+  github_org: "SEEMEDI"
+
+repos:
+  infra: "SEEMEDI/infra"
+  app: "SEEMEDI/k8s-local-lab"
+
+environments:
+  local_url: "http://app.localhost"
+  staging_url: ""                        # TODO: 스테이징 환경 구축 후 채우기
+  prod_url: ""                           # TODO: 프로덕션 환경 구축 후 채우기
+  cluster_local: "k3d-seemedi-local"
+  cluster_staging: ""
+  cluster_prod: ""
+
+registry:
+  container: "ghcr.io/seemedi"
+
+alerts:
+  incident_channel: ""                   # TODO: Slack 채널 설정 후 채우기
+  oncall_handle: ""

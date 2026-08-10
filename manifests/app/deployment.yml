@@ -1,0 +1,84 @@
+# ============================================================================
+# Deployment — 앱의 "원하는 상태"를 선언하는 리소스
+#
+# Deployment가 하는 일:
+#   1. 지정한 수(replicas)만큼 Pod를 유지한다
+#   2. Pod가 죽으면 자동으로 새 Pod를 생성한다
+#   3. 이미지가 바뀌면 롤링 업데이트로 무중단 배포한다
+#   4. 문제가 생기면 이전 버전으로 롤백할 수 있다
+#
+# Pod란?
+#   - 쿠버네티스에서 배포하는 가장 작은 단위
+#   - 하나 이상의 컨테이너를 감싸는 껍데기
+#   - 같은 Pod 안의 컨테이너는 네트워크(localhost)를 공유한다
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-app
+  namespace: seemedi-dev
+  labels:
+    app: sample-app
+spec:
+  replicas: 2                           # Pod 2개를 항상 유지
+  selector:
+    matchLabels:
+      app: sample-app                   # 이 라벨을 가진 Pod를 관리
+  template:                             # Pod 템플릿 — 이 설정대로 Pod를 생성
+    metadata:
+      labels:
+        app: sample-app
+    spec:
+      # ── 보안 설정 ──────────────────────────────────────────────────────
+      securityContext:
+        runAsNonRoot: true              # root로 실행 금지
+        runAsUser: 1001                 # Dockerfile의 appuser UID
+        runAsGroup: 1001
+        fsGroup: 1001
+
+      containers:
+        - name: app
+          image: sample-app:local       # k3d에 import한 로컬 이미지
+          imagePullPolicy: Never        # 외부 레지스트리에서 pull하지 않음 (로컬 이미지 사용)
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+
+          # ── 환경 변수: ConfigMap에서 가져오기 ──────────────────────────
+          envFrom:
+            - configMapRef:
+                name: sample-app-config   # configmap.yml에서 정의한 ConfigMap
+            - secretRef:
+                name: sample-app-secret   # secret.yml에서 정의한 Secret
+
+          # ── Liveness Probe ────────────────────────────────────────────
+          # "이 Pod가 살아있는가?"
+          # 실패하면 → Pod를 재시작
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5        # 앱 시작 후 5초 대기
+            periodSeconds: 10             # 10초마다 확인
+            failureThreshold: 3           # 3번 연속 실패하면 재시작
+
+          # ── Readiness Probe ───────────────────────────────────────────
+          # "이 Pod가 트래픽을 받을 준비가 되었는가?"
+          # 실패하면 → Service에서 제외 (트래픽 안 보냄)
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+
+          # ── 리소스 제한 ───────────────────────────────────────────────
+          # requests: 최소 보장 리소스 (스케줄링 기준)
+          # limits: 최대 사용 가능 리소스 (초과하면 OOMKill)
+          resources:
+            requests:
+              cpu: "100m"               # 0.1 CPU core
+              memory: "128Mi"           # 128 MiB
+            limits:
+              cpu: "500m"               # 0.5 CPU core
+              memory: "256Mi"           # 256 MiB
