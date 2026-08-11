@@ -29,7 +29,9 @@ set -euo pipefail
 
 # ── 클러스터 파라미터 ──────────────────────────────────────────────────────
 CLUSTER_NAME="seemedi-local"   # 클러스터 이름 — Makefile의 CLUSTER_NAME, kubectl 컨텍스트(k3d-seemedi-local)와 연동
-AGENTS=2                       # 워커 노드 수
+AGENTS=2                       # 워커 노드 수 — 이 값만 바꾸면 노드를 늘릴 수 있다 (예: 4 → 1 server + 4 agents)
+                               # 재생성 없이 실행 중인 클러스터에 노드를 추가하려면:
+                               #   k3d node create <노드명> --cluster seemedi-local --role agent
 SERVER_PORT_HTTP=80            # 호스트에서 열 HTTP 포트
 SERVER_PORT_HTTPS=443          # 호스트에서 열 HTTPS 포트
 
@@ -59,6 +61,14 @@ echo ""
 
 # k3d cluster create 옵션 설명:
 #   --servers 1                : 컨트롤 플레인 노드 1개 (로컬이므로 1개, 프로덕션은 3개 HA)
+#                                서버를 늘릴 땐 반드시 홀수(1, 3, 5)로 한다.
+#                                이유: etcd 쿼럼 — 클러스터 상태 저장소(etcd)는 쓰기마다
+#                                전체 서버의 "과반수 동의"가 필요하다. 과반수를 못 채우면
+#                                쓰기를 거부해 데이터가 갈라지는 것(split-brain)을 막는다.
+#                                짝수는 장애 허용 수가 한 단계 아래 홀수와 같아서
+#                                (2대=0대 허용, 4대=1대 허용) 비용만 늘고 안정성은 그대로.
+#                                주의: 서버가 2개 이상이면 아래 --disable=traefik의
+#                                @server:0 을 @server:* 로 바꿔야 모든 서버에 적용된다.
 #   --agents N                 : 워커 노드 N개
 #   --port "80:80@loadbalancer": 호스트 80 포트 → 클러스터 내장 로드밸런서의 80 포트.
 #                                이 매핑 덕분에 Ingress(nginx)가 받은 트래픽이
@@ -87,7 +97,7 @@ info "kubeconfig 설정 중..."
 k3d kubeconfig merge "$CLUSTER_NAME" --kubeconfig-switch-context
 
 # ── 노드 상태 확인 ─────────────────────────────────────────────────────────
-# 3개 노드(server 1 + agent 2)가 모두 Ready면 성공.
+# 노드 전체(server 1 + agent $AGENTS)가 모두 Ready면 성공.
 # (기대 출력 예시: docs/03-local-setup-guide.md — Step 2 확인)
 echo ""
 info "=== 클러스터 노드 상태 ==="
