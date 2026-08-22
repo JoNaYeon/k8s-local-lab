@@ -56,3 +56,5 @@ config/ops.config.yml
 .terraform/
 *.tfstate
 *.tfstate.backup
+CLAUDE.local.md
+.banned-terms.local
